@@ -3,28 +3,59 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const searchInput = document.getElementById("search-input");
+  const categoryFilter = document.getElementById("category-filter");
+  const sortSelect = document.getElementById("sort-select");
 
-  // Function to fetch activities from API
-  async function fetchActivities() {
-    try {
-      const response = await fetch("/activities");
-      const activities = await response.json();
+  let allActivities = {};
 
-      // Clear loading message
-      activitiesList.innerHTML = "";
+  // Helper to get unique categories
+  function getCategories(activities) {
+    const cats = new Set();
+    Object.values(activities).forEach((details) => {
+      if (details.category) cats.add(details.category);
+    });
+    return Array.from(cats);
+  }
 
-      // Populate activities list
-      Object.entries(activities).forEach(([name, details]) => {
-        const activityCard = document.createElement("div");
-        activityCard.className = "activity-card";
+  // Render activities with filters, search, and sort
+  function renderActivities() {
+    let filtered = Object.entries(allActivities);
 
-        const spotsLeft =
-          details.max_participants - details.participants.length;
+    // Filter by category
+    const selectedCategory = categoryFilter.value;
+    if (selectedCategory) {
+      filtered = filtered.filter(([, d]) => d.category === selectedCategory);
+    }
 
-        // Create participants HTML with delete icons instead of bullet points
-        const participantsHTML =
-          details.participants.length > 0
-            ? `<div class="participants-section">
+    // Search by name/description
+    const search = searchInput.value.trim().toLowerCase();
+    if (search) {
+      filtered = filtered.filter(
+        ([name, d]) =>
+          name.toLowerCase().includes(search) ||
+          (d.description && d.description.toLowerCase().includes(search))
+      );
+    }
+
+    // Sort
+    if (sortSelect.value === "spots") {
+      filtered.sort((a, b) =>
+        (b[1].max_participants - b[1].participants.length) -
+        (a[1].max_participants - a[1].participants.length)
+      );
+    } else {
+      filtered.sort((a, b) => a[0].localeCompare(b[0]));
+    }
+
+    activitiesList.innerHTML = "";
+    filtered.forEach(([name, details]) => {
+      const activityCard = document.createElement("div");
+      activityCard.className = "activity-card";
+      const spotsLeft = details.max_participants - details.participants.length;
+      const participantsHTML =
+        details.participants.length > 0
+          ? `<div class="participants-section">
               <h5>Participants:</h5>
               <ul class="participants-list">
                 ${details.participants
@@ -35,31 +66,51 @@ document.addEventListener("DOMContentLoaded", () => {
                   .join("")}
               </ul>
             </div>`
-            : `<p><em>No participants yet</em></p>`;
+          : `<p><em>No participants yet</em></p>`;
+      activityCard.innerHTML = `
+        <h4>${name}</h4>
+        <p>${details.description}</p>
+        <p><strong>Schedule:</strong> ${details.schedule}</p>
+        <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+        <div class="participants-container">
+          ${participantsHTML}
+        </div>
+      `;
+      activitiesList.appendChild(activityCard);
+    });
+    // Add event listeners to delete buttons
+    document.querySelectorAll(".delete-btn").forEach((button) => {
+      button.addEventListener("click", handleUnregister);
+    });
+  }
 
-        activityCard.innerHTML = `
-          <h4>${name}</h4>
-          <p>${details.description}</p>
-          <p><strong>Schedule:</strong> ${details.schedule}</p>
-          <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
-          <div class="participants-container">
-            ${participantsHTML}
-          </div>
-        `;
+  // Populate category filter
+  function renderCategories() {
+    const cats = getCategories(allActivities);
+    categoryFilter.innerHTML = '<option value="">All Categories</option>' +
+      cats.map(cat => `<option value="${cat}">${cat}</option>`).join("");
+  }
 
-        activitiesList.appendChild(activityCard);
+  // Populate activity select dropdown
+  function renderActivitySelect() {
+    activitySelect.innerHTML = '';
+    Object.keys(allActivities).forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      activitySelect.appendChild(option);
+    });
+  }
 
-        // Add option to select dropdown
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        activitySelect.appendChild(option);
-      });
-
-      // Add event listeners to delete buttons
-      document.querySelectorAll(".delete-btn").forEach((button) => {
-        button.addEventListener("click", handleUnregister);
-      });
+  // Fetch activities from API
+  async function fetchActivities() {
+    try {
+      const response = await fetch("/activities");
+      const activities = await response.json();
+      allActivities = activities;
+      renderCategories();
+      renderActivitySelect();
+      renderActivities();
     } catch (error) {
       activitiesList.innerHTML =
         "<p>Failed to load activities. Please try again later.</p>";
@@ -110,40 +161,28 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+
   // Handle form submission
   signupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-
     const email = document.getElementById("email").value;
     const activity = document.getElementById("activity").value;
-
     try {
       const response = await fetch(
-        `/activities/${encodeURIComponent(
-          activity
-        )}/signup?email=${encodeURIComponent(email)}`,
-        {
-          method: "POST",
-        }
+        `/activities/${encodeURIComponent(activity)}/signup?email=${encodeURIComponent(email)}`,
+        { method: "POST" }
       );
-
       const result = await response.json();
-
       if (response.ok) {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
         signupForm.reset();
-
-        // Refresh activities list to show updated participants
         fetchActivities();
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
       }
-
       messageDiv.classList.remove("hidden");
-
-      // Hide message after 5 seconds
       setTimeout(() => {
         messageDiv.classList.add("hidden");
       }, 5000);
@@ -154,6 +193,16 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Error signing up:", error);
     }
   });
+
+  // Toolbar event listeners
+  if (searchInput && categoryFilter && sortSelect) {
+    searchInput.addEventListener("input", renderActivities);
+    categoryFilter.addEventListener("change", renderActivities);
+    sortSelect.addEventListener("change", renderActivities);
+  }
+
+  // Initialize app
+  fetchActivities();
 
   // Initialize app
   fetchActivities();
